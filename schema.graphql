@@ -1,0 +1,55 @@
+type User { id: Int!, email: String!, fullName: String! }
+type Flight {
+  id: String!, airline: String!, origin: String!, destination: String!, travelDate: String!,
+  departureAt: String, arrivalAt: String, price: Float!, currency: String!,
+  source: String!, sourceUrl: String!, snapshotId: String!, scrapedAt: String!
+}
+type Hotel {
+  id: String!, name: String!, roomType: String, city: String!, nightlyPrice: Float!, currency: String!, rating: Float,
+  source: String!, sourceUrl: String!, snapshotId: String!, scrapedAt: String!
+}
+type Car {
+  id: String!, provider: String!, model: String!, city: String!, dailyPrice: Float!, currency: String!, category: String,
+  source: String!, sourceUrl: String!, snapshotId: String!, scrapedAt: String!
+}
+type DateCombination { departureDate: String!, returnDate: String!, nights: Int!, lowestOutboundPrice: Float!, lowestReturnPrice: Float!, lowestFlightTotal: Float! }
+type TravelAvailability { origin: String!, destination: String!, airportCodes: [String!]!, outboundDates: [String!]!, returnDates: [String!]!, outboundOfferCount: Int!, returnOfferCount: Int!, combinations: [DateCombination!]! }
+type TravelCity { code: String!, name: String!, airports: [String!]! }
+type TravelRoute { origin: String!, destination: String!, offerCount: Int!, sources: [String!]!, outboundAvailable: Boolean!, roundTripAvailable: Boolean!, packageAvailable: Boolean!, firstDate: String, lastDate: String, lowestPrice: Float, coverageStatus: String!, visibleOfferCount: Int!, rawOfferCount: Int!, sourcesChecked: Int!, sourcesAvailable: Int! }
+type TravelNetwork { cities: [TravelCity!]!, routes: [TravelRoute!]! }
+type FlightDateOption { travelDate: String!, directOfferCount: Int!, connectionCandidateCount: Int! }
+type FlightAvailabilityResult { origin: String!, destination: String!, dates: [FlightDateOption!]! }
+type SuggestedConnection { via: String!, stops: Int!, totalPrice: Float!, currency: String!, legs: [Flight!]!, warning: String! }
+type FlightSearchResult { origin: String!, destination: String!, travelDate: String!, status: String!, availableCount: Int!, sourcesChecked: Int!, sourcesAvailable: Int!, directOffers: [Flight!]!, connections: [SuggestedConnection!]! }
+type SourceHealthItem { source: String!, status: String!, available: Boolean!, itemsFound: Int!, finishedAt: String }
+type SourceHealthSummary { activeCount: Int!, totalCount: Int!, sources: [SourceHealthItem!]! }
+
+type TravelPackage { id: String!, outboundFlight: Flight!, returnFlight: Flight!, hotel: Hotel!, car: Car!, nights: Int!, flightTotal: Float!, total: Float! }
+type Booking { id: String!, userId: Int!, flightId: String, outboundFlightId: String!, returnFlightId: String, hotelId: String!, carId: String!, total: Float!, status: String!, paymentStatus: String!, failureReason: String, createdAt: String! }
+type SagaEvent { id: Int!, orderId: String!, step: String!, action: String!, status: String!, detail: String, createdAt: String! }
+type SessionInfo { authenticated: Boolean!, sessionPrefix: String!, createdAt: String, rotatedAt: String, userEmail: String }
+type SecurityStatus { passwordHashing: String!, sessionFixationProtection: String!, cookiePolicy: String!, loginRateLimit: String!, checkoutRateLimit: String!, paymentRateLimit: String!, dependencyAudit: String! }
+type DatabaseStatus { connected: Boolean!, database: String!, dbUser: String!, users: Int!, flights: Int!, hotels: Int!, cars: Int!, orders: Int! }
+
+type Query {
+  sessionInfo: SessionInfo!
+  me: User
+  flightOffers(origin: String!, destination: String!, limit: Int! = 20, travelDate: String): [Flight!]!
+  travelNetwork: TravelNetwork!
+  sourceHealth: SourceHealthSummary!
+  flightAvailability(origin: String!, destination: String!): FlightAvailabilityResult!
+  flightSearch(origin: String!, destination: String!, travelDate: String!, limit: Int! = 20): FlightSearchResult!
+  travelAvailability(origin: String!, destination: String!, outboundLimit: Int! = 8, returnLimit: Int! = 8): TravelAvailability!
+  travelPackages(origin: String!, destination: String!, startDate: String!, endDate: String!, limit: Int! = 8): [TravelPackage!]!
+  myBookings: [Booking!]!
+  sagaEvents(orderId: String!): [SagaEvent!]!
+  securityStatus: SecurityStatus!
+  databaseStatus: DatabaseStatus!
+}
+
+type Mutation {
+  register(email: String!, fullName: String!, password: String!): User!
+  login(email: String!, password: String!): User!
+  logout: Boolean!
+  checkoutPackage(outboundFlightId: String!, returnFlightId: String!, hotelId: String!, carId: String!, nights: Int!, total: Float!, simulateFailure: String): Booking!
+}

@@ -1,0 +1,349 @@
+name: wandersync
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-wandersync}
+      POSTGRES_USER: ${POSTGRES_USER:-wandersync}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wandersync_dev_password}
+    volumes:
+    - postgres_data:/var/lib/postgresql/data
+    - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    ports:
+    - 127.0.0.1:5432:5432
+    healthcheck:
+      test:
+      - CMD-SHELL
+      - pg_isready -U ${POSTGRES_USER:-wandersync} -d ${POSTGRES_DB:-wandersync}
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+  db-bootstrap:
+    image: postgres:17-alpine
+    environment:
+      PGHOST: postgres
+      PGPORT: 5432
+      PGDATABASE: ${POSTGRES_DB:-wandersync}
+      PGUSER: ${POSTGRES_USER:-wandersync}
+      PGPASSWORD: ${POSTGRES_PASSWORD:-wandersync_dev_password}
+    volumes:
+    - ./infra/postgres/init.sql:/schema/init.sql:ro
+    command: sh -c "psql -v ON_ERROR_STOP=1 -f /schema/init.sql && psql -v ON_ERROR_STOP=1
+      -c 'SELECT current_database() AS database, current_user AS db_user;' && psql
+      -v ON_ERROR_STOP=1 -c \"SELECT COUNT(*) AS application_tables FROM information_schema.tables
+      WHERE table_schema='public';\""
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+  redis:
+    image: redis:7-alpine
+    command:
+    - redis-server
+    - --appendonly
+    - 'yes'
+    volumes:
+    - redis_data:/data
+    healthcheck:
+      test:
+      - CMD
+      - redis-cli
+      - ping
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+  flight-service:
+    build: ./backend
+    command: uvicorn flight_service.main:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://localhost:8000/health',
+        timeout=2)
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    environment: &id001
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wandersync}:${POSTGRES_PASSWORD:-wandersync_dev_password}@postgres:5432/${POSTGRES_DB:-wandersync}
+      ALLOW_FAILURE_INJECTION: ${ALLOW_FAILURE_INJECTION:-true}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
+    expose:
+    - '8000'
+    restart: unless-stopped
+  hotel-service:
+    build: ./backend
+    command: uvicorn hotel_service.main:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://localhost:8000/health',
+        timeout=2)
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    environment: *id001
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
+    expose:
+    - '8000'
+    restart: unless-stopped
+  car-service:
+    build: ./backend
+    command: uvicorn car_service.main:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://localhost:8000/health',
+        timeout=2)
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    environment: *id001
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
+    expose:
+    - '8000'
+    restart: unless-stopped
+  order-service:
+    build: ./backend
+    command: uvicorn order_service.main:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://localhost:8000/health',
+        timeout=2)
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wandersync}:${POSTGRES_PASSWORD:-wandersync_dev_password}@postgres:5432/${POSTGRES_DB:-wandersync}
+      ALLOW_FAILURE_INJECTION: ${ALLOW_FAILURE_INJECTION:-true}
+      FLIGHT_SERVICE_URL: http://flight-service:8000
+      HOTEL_SERVICE_URL: http://hotel-service:8000
+      CAR_SERVICE_URL: http://car-service:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
+      flight-service:
+        condition: service_healthy
+      hotel-service:
+        condition: service_healthy
+      car-service:
+        condition: service_healthy
+    expose:
+    - '8000'
+    restart: unless-stopped
+  graphql-gateway:
+    build: ./backend
+    command: uvicorn gateway.main:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test:
+      - CMD
+      - python
+      - -c
+      - import urllib.request; urllib.request.urlopen('http://localhost:8000/health',
+        timeout=2)
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wandersync}:${POSTGRES_PASSWORD:-wandersync_dev_password}@postgres:5432/${POSTGRES_DB:-wandersync}
+      ALLOW_FAILURE_INJECTION: ${ALLOW_FAILURE_INJECTION:-true}
+      REDIS_URL: redis://redis:6379/0
+      COOKIE_NAME: ${COOKIE_NAME:-wander_session}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:8080}
+      FLIGHT_SERVICE_URL: http://flight-service:8000
+      HOTEL_SERVICE_URL: http://hotel-service:8000
+      CAR_SERVICE_URL: http://car-service:8000
+      ORDER_SERVICE_URL: http://order-service:8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      flight-service:
+        condition: service_healthy
+      hotel-service:
+        condition: service_healthy
+      car-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+    ports:
+    - 8000:8000
+    restart: unless-stopped
+  prefect-server:
+    image: prefecthq/prefect:3.8.8-python3.12
+    command: prefect server start --host 0.0.0.0
+    environment:
+      PREFECT_SERVER_API_HOST: 0.0.0.0
+    volumes:
+    - prefect_data:/root/.prefect
+    ports:
+    - 4200:4200
+    restart: unless-stopped
+  dask-scheduler:
+    build: ./ingestion
+    environment:
+      PYTHONPATH: /app
+    command: dask scheduler --host 0.0.0.0 --port 8786 --dashboard-address :8787
+    healthcheck:
+      test:
+      - CMD
+      - python
+      - -c
+      - import socket; s=socket.create_connection(('localhost',8786),2); s.close()
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    expose:
+    - '8786'
+    ports:
+    - 8787:8787
+    restart: unless-stopped
+  dask-worker-1:
+    build: ./ingestion
+    environment:
+      PYTHONPATH: /app
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wandersync}:${POSTGRES_PASSWORD:-wandersync_dev_password}@postgres:5432/${POSTGRES_DB:-wandersync}
+      SCRAPE_SNAPSHOT_ROOT: ${SCRAPE_SNAPSHOT_ROOT:-/data/snapshots}
+      SCRAPE_CACHE_MINUTES: ${SCRAPE_CACHE_MINUTES:-30}
+      SCRAPE_STALE_MAX_HOURS: ${SCRAPE_STALE_MAX_HOURS:-24}
+      SCRAPE_MIN_INTERVAL_SECONDS: ${SCRAPE_MIN_INTERVAL_SECONDS:-90}
+      SCRAPE_MAX_INTERVAL_SECONDS: ${SCRAPE_MAX_INTERVAL_SECONDS:-180}
+      SCRAPE_MAX_CONCURRENCY_PER_SOURCE: ${SCRAPE_MAX_CONCURRENCY_PER_SOURCE:-1}
+      SCRAPE_NAVIGATION_TIMEOUT_SECONDS: ${SCRAPE_NAVIGATION_TIMEOUT_SECONDS:-45}
+      SCRAPE_RETRY_LIMIT: ${SCRAPE_RETRY_LIMIT:-2}
+      SCRAPE_ENABLED_SOURCES: ${SCRAPE_ENABLED_SOURCES:-clicair,satena,jetsmart,wingo,ghl_porton_medellin,alkilautos_national_medellin}
+      TARGET_OFFERS_PER_DIRECTION: ${TARGET_OFFERS_PER_DIRECTION:-10}
+      MAX_ROUTE_CONCURRENCY_PER_SOURCE: ${MAX_ROUTE_CONCURRENCY_PER_SOURCE:-2}
+    command: dask worker tcp://dask-scheduler:8786 --nthreads 2 --memory-limit 512MB
+      --name worker-1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
+      dask-scheduler:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+    - scrape_snapshots:/data/snapshots
+  dask-worker-2:
+    build: ./ingestion
+    environment:
+      PYTHONPATH: /app
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wandersync}:${POSTGRES_PASSWORD:-wandersync_dev_password}@postgres:5432/${POSTGRES_DB:-wandersync}
+      SCRAPE_SNAPSHOT_ROOT: ${SCRAPE_SNAPSHOT_ROOT:-/data/snapshots}
+      SCRAPE_CACHE_MINUTES: ${SCRAPE_CACHE_MINUTES:-30}
+      SCRAPE_STALE_MAX_HOURS: ${SCRAPE_STALE_MAX_HOURS:-24}
+      SCRAPE_MIN_INTERVAL_SECONDS: ${SCRAPE_MIN_INTERVAL_SECONDS:-90}
+      SCRAPE_MAX_INTERVAL_SECONDS: ${SCRAPE_MAX_INTERVAL_SECONDS:-180}
+      SCRAPE_MAX_CONCURRENCY_PER_SOURCE: ${SCRAPE_MAX_CONCURRENCY_PER_SOURCE:-1}
+      SCRAPE_NAVIGATION_TIMEOUT_SECONDS: ${SCRAPE_NAVIGATION_TIMEOUT_SECONDS:-45}
+      SCRAPE_RETRY_LIMIT: ${SCRAPE_RETRY_LIMIT:-2}
+      SCRAPE_ENABLED_SOURCES: ${SCRAPE_ENABLED_SOURCES:-clicair,satena,jetsmart,wingo,ghl_porton_medellin,alkilautos_national_medellin}
+      TARGET_OFFERS_PER_DIRECTION: ${TARGET_OFFERS_PER_DIRECTION:-10}
+      MAX_ROUTE_CONCURRENCY_PER_SOURCE: ${MAX_ROUTE_CONCURRENCY_PER_SOURCE:-2}
+    command: dask worker tcp://dask-scheduler:8786 --nthreads 2 --memory-limit 512MB
+      --name worker-2
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
+      dask-scheduler:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+    - scrape_snapshots:/data/snapshots
+  ingestion-runner:
+    build: ./ingestion
+    command: python -m ingestion.runner
+    environment:
+      PYTHONPATH: /app
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wandersync}:${POSTGRES_PASSWORD:-wandersync_dev_password}@postgres:5432/${POSTGRES_DB:-wandersync}
+      DASK_SCHEDULER: tcp://dask-scheduler:8786
+      PREFECT_API_URL: http://prefect-server:4200/api
+      INGEST_INTERVAL_SECONDS: ${INGEST_INTERVAL_SECONDS:-900}
+      INGEST_RUN_ONCE: ${INGEST_RUN_ONCE:-false}
+      SCRAPE_SNAPSHOT_ROOT: ${SCRAPE_SNAPSHOT_ROOT:-/data/snapshots}
+      SCRAPE_CACHE_MINUTES: ${SCRAPE_CACHE_MINUTES:-30}
+      SCRAPE_STALE_MAX_HOURS: ${SCRAPE_STALE_MAX_HOURS:-24}
+      SCRAPE_MIN_INTERVAL_SECONDS: ${SCRAPE_MIN_INTERVAL_SECONDS:-90}
+      SCRAPE_MAX_INTERVAL_SECONDS: ${SCRAPE_MAX_INTERVAL_SECONDS:-180}
+      SCRAPE_MAX_CONCURRENCY_PER_SOURCE: ${SCRAPE_MAX_CONCURRENCY_PER_SOURCE:-1}
+      SCRAPE_NAVIGATION_TIMEOUT_SECONDS: ${SCRAPE_NAVIGATION_TIMEOUT_SECONDS:-45}
+      SCRAPE_RETRY_LIMIT: ${SCRAPE_RETRY_LIMIT:-2}
+      SCRAPE_ENABLED_SOURCES: ${SCRAPE_ENABLED_SOURCES:-clicair,satena,jetsmart,wingo,ghl_porton_medellin,alkilautos_national_medellin}
+      TARGET_OFFERS_PER_DIRECTION: ${TARGET_OFFERS_PER_DIRECTION:-10}
+      MAX_ROUTE_CONCURRENCY_PER_SOURCE: ${MAX_ROUTE_CONCURRENCY_PER_SOURCE:-2}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      db-bootstrap:
+        condition: service_completed_successfully
+      dask-scheduler:
+        condition: service_healthy
+      prefect-server:
+        condition: service_started
+    restart: unless-stopped
+    volumes:
+    - scrape_snapshots:/data/snapshots
+  adminer:
+    image: adminer:5
+    environment:
+      ADMINER_DEFAULT_SERVER: postgres
+    depends_on:
+      db-bootstrap:
+        condition: service_completed_successfully
+    ports:
+    - 8081:8080
+    restart: unless-stopped
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_GRAPHQL_URL: ${GRAPHQL_URL:-http://localhost:8000/graphql}
+    depends_on:
+      graphql-gateway:
+        condition: service_healthy
+    ports:
+    - 8080:80
+    restart: unless-stopped
+volumes:
+  postgres_data: null
+  redis_data: null
+  prefect_data: null
+  scrape_snapshots: null

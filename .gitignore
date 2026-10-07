@@ -1,0 +1,20 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+dist/
+coverage/
+security/reports/*.json
+security/reports/*.txt
+!security/reports/README.md
+
+.superpowers/
+
+# Real-scraping runtime artifacts
+scrape_snapshots/
+.playwright/
+playwright-report/
+
+.worktrees/
+.superpowers/
