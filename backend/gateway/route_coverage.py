@@ -46,7 +46,7 @@ def _dedup_key(row: dict):
 def select_direction_offers(rows: list[dict], *, origin: str, destination: str, limit: int = 10) -> tuple[dict, ...]:
     origin = origin.strip().upper()
     destination = destination.strip().upper()
-    capped = max(1, min(TARGET_OFFERS_PER_DIRECTION, int(limit)))
+    capped = max(1, min(10000, int(limit)))
     seen = set()
     matches: list[dict] = []
     for row in rows:

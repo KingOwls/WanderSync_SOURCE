@@ -11,6 +11,8 @@ PRICE_RE = re.compile(r"(?:COP\s*)?\$\s*([\d][\d.,]*)", re.I)
 
 def _city(text: str) -> str | None:
     folded = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().lower()
+    if "santa marta" in folded:
+        return "Santa Marta"
     if "medellin" in folded:
         return "Medellín"
     if "bogota" in folded:
@@ -24,7 +26,7 @@ def _city(text: str) -> str | None:
 
 def _provider_from_title(title: str) -> str | None:
     m = re.match(
-        r"\s*(?:Carros\s+de\s+)?(.+?)\s+en\s+(Medell[ií]n|Bogot[aá]|Cali|Cartagena)\b",
+        r"\s*(?:Carros\s+de\s+)?(.+?)\s+en\s+(Medell[ií]n|Bogot[aá]|Cali|Cartagena|Santa Marta)\b",
         title,
         re.I,
     )

@@ -1,7 +1,7 @@
 FROM node:22-alpine AS build
 WORKDIR /app
-COPY package.json ./
-RUN npm install
+COPY package.json package-lock.json ./
+RUN npm ci
 COPY . .
 ARG VITE_GRAPHQL_URL=http://localhost:8000/graphql
 ENV VITE_GRAPHQL_URL=$VITE_GRAPHQL_URL

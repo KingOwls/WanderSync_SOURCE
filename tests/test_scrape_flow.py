@@ -1,3 +1,10 @@
+import pytest
+
+@pytest.fixture(autouse=True)
+def mock_route_audit(monkeypatch):
+    import ingestion.flow as module
+    monkeypatch.setattr(module, "record_route_result", lambda *a, **k: None)
+
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 

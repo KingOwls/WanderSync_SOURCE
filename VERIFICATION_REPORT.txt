@@ -175,7 +175,7 @@ Passed: 197/197
 [PASS] holds:no-external-inventory:backend/car_service/main.py
 [PASS] holds:local-scope:backend/car_service/main.py
 [PASS] frontend:travel-network
-[PASS] frontend:no-free-date-input
+[PASS] frontend:date-range-and-observed-dates
 [PASS] frontend:two-search-modes
 [PASS] frontend:no-hardcoded-city-list
 [PASS] frontend:flight-availability

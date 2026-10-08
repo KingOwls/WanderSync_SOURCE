@@ -15,15 +15,15 @@ def test_frontend_bootstraps_dynamic_network_and_has_two_modes():
 
 
 def test_flight_mode_uses_flight_availability_without_free_dates():
-    assert 'type="date"' not in FRONTEND
-    assert "flightAvailability(origin:$origin,destination:$destination)" in FRONTEND
+    assert 'type="date"' in FRONTEND
+    assert "flightAvailability(origin:$origin,destination:$destination,startDate:$from,endDate:$to,limit:90)" in FRONTEND
     assert "flightAvailability" in FRONTEND
     assert "date-chip" in FRONTEND
     assert "travelAvailability" in FRONTEND  # packages keep their direct roundtrip availability
 
 
 def test_flight_mode_queries_flight_search_for_exact_selected_date_and_provenance():
-    assert "flightSearch(origin:$origin,destination:$destination,travelDate:$travelDate,limit:50)" in FRONTEND
+    assert "flightSearch(origin:$origin,destination:$destination,travelDate:$travelDate,limit:10,offset:$offset)" in FRONTEND
     assert "directOffers" in FRONTEND
     assert "connections" in FRONTEND
     for token in ("via", "stops", "totalPrice", "currency", "warning", "legs"):
@@ -33,7 +33,7 @@ def test_flight_mode_queries_flight_search_for_exact_selected_date_and_provenanc
 
 
 def test_all_twenty_direction_routes_remain_selectable_in_flight_mode():
-    assert "searchMode === 'packages' ? route.packageAvailable : true" in FRONTEND
+    assert "route.origin !== route.destination" in FRONTEND
     assert "route.outboundAvailable" not in FRONTEND.split("const eligibleRoutes", 1)[1].split("const originCodes", 1)[0]
     assert "route.destination !== form.origin" in FRONTEND
 

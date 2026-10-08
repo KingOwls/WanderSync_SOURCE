@@ -143,11 +143,11 @@ def main():
                 package = packages[0]
                 for key in ("outboundFlight", "returnFlight", "hotel", "car"):
                     require_provenance(package[key], key)
-                checkout_query = "mutation($outbound:String!,$returnFlight:String!,$h:String!,$c:String!,$n:Int!,$t:Float!,$x:String){checkoutPackage(outboundFlightId:$outbound,returnFlightId:$returnFlight,hotelId:$h,carId:$c,nights:$n,total:$t,simulateFailure:$x){id status paymentStatus}}"
-                variables = {"outbound": package["outboundFlight"]["id"], "returnFlight": package["returnFlight"]["id"], "h": package["hotel"]["id"], "c": package["car"]["id"], "n": package["nights"], "t": package["total"], "x": None}
+                checkout_query = "mutation($outbound:String!,$returnFlight:String!,$h:String!,$c:String!,$n:Int!,$t:Float!,$x:String,$key:String!){checkoutPackage(idempotencyKey:$key,outboundFlightId:$outbound,returnFlightId:$returnFlight,hotelId:$h,carId:$c,nights:$n,total:$t,simulateFailure:$x){id status paymentStatus}}"
+                variables = {"outbound": package["outboundFlight"]["id"], "returnFlight": package["returnFlight"]["id"], "h": package["hotel"]["id"], "c": package["car"]["id"], "n": package["nights"], "t": package["total"], "x": None, "key": __import__("uuid").uuid4().hex}
                 happy = call(client, checkout_query, variables)[1]["data"]["checkoutPackage"]
                 assert happy["status"] == "CONFIRMED"
-                failed_vars = dict(variables); failed_vars["x"] = "return_flight"
+                failed_vars = dict(variables); failed_vars["x"] = "return_flight"; failed_vars["key"] = __import__("uuid").uuid4().hex
                 failed = call(client, checkout_query, failed_vars)[1]["data"]["checkoutPackage"]
                 assert failed["status"] == "CANCELLED"
                 events = call(client, "query($id:String!){sagaEvents(orderId:$id){step action status}}", {"id": failed["id"]})[1]["data"]["sagaEvents"]

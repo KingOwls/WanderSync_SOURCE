@@ -22,6 +22,10 @@ function routeStatusMessage(status) {
 
 function App() {
   const [tab, setTab] = useState('search');
+  const [catalogUpdate, setCatalogUpdate] = useState(null);
+  const [range, setRange] = useState({ startDate: '', endDate: '' });
+  const [flightPage, setFlightPage] = useState({ offset: 0, hasMore: false, totalCount: 0 });
+  const checkoutKeys = React.useRef({});
   const [searchMode, setSearchMode] = useState('flights');
   const [network, setNetwork] = useState({ cities: [], routes: [] });
   const [user, setUser] = useState(null);
@@ -46,7 +50,7 @@ function App() {
 
   const cityByCode = useMemo(() => Object.fromEntries((network.cities || []).map(city => [city.code, city])), [network.cities]);
   const eligibleRoutes = useMemo(
-    () => (network.routes || []).filter(route => searchMode === 'packages' ? route.packageAvailable : true),
+    () => (network.routes || []).filter(route => route.origin !== route.destination),
     [network.routes, searchMode],
   );
   const originCodes = useMemo(() => [...new Set(eligibleRoutes.map(route => route.origin))], [eligibleRoutes]);
@@ -66,11 +70,13 @@ function App() {
           cities { code name airports }
           routes { origin destination offerCount sources outboundAvailable roundTripAvailable packageAvailable firstDate lastDate lowestPrice coverageStatus visibleOfferCount rawOfferCount sourcesChecked sourcesAvailable }
         }
+        catalogUpdate { startedAt finishedAt status intervalHours }
         sessionInfo { authenticated sessionPrefix createdAt rotatedAt userEmail }
         me { id email fullName }
         securityStatus { passwordHashing sessionFixationProtection cookiePolicy loginRateLimit checkoutRateLimit paymentRateLimit dependencyAudit }
         databaseStatus { connected database dbUser users flights hotels cars orders }
       }`);
+      setCatalogUpdate(data.catalogUpdate);
       setNetwork(data.travelNetwork || { cities: [], routes: [] });
       setSession(data.sessionInfo); setUser(data.me); setSecurity(data.securityStatus); setDatabase(data.databaseStatus);
     } catch (e) { setNotice(`No se pudo conectar con el Gateway: ${e.message}`); }
@@ -85,7 +91,11 @@ function App() {
     }
   }
 
-  useEffect(() => { bootstrap(); refreshSourceHealth(); }, []);
+  useEffect(() => {
+    bootstrap(); refreshSourceHealth();
+    const timer = setInterval(() => { bootstrap(); refreshSourceHealth(); }, 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (!eligibleRoutes.length) {
@@ -110,12 +120,12 @@ function App() {
       return;
     }
     try {
-      const data = await gql(`query Availability($origin:String!,$destination:String!){
-        travelAvailability(origin:$origin,destination:$destination,outboundLimit:8,returnLimit:8){
+      const data = await gql(`query Availability($origin:String!,$destination:String!,$from:String,$to:String){
+        travelAvailability(origin:$origin,destination:$destination,outboundLimit:90,returnLimit:90,startDate:$from,endDate:$to){
           origin destination airportCodes outboundDates returnDates outboundOfferCount returnOfferCount
           combinations{ departureDate returnDate nights lowestOutboundPrice lowestReturnPrice lowestFlightTotal }
         }
-      }`, { origin, destination });
+      }`, { origin, destination, from: range.startDate || null, to: range.endDate || null });
       const next = data.travelAvailability || emptyAvailability;
       setPackageAvailability(next);
       setFlightResults([]); setConnections([]); setPackages([]);
@@ -143,11 +153,11 @@ function App() {
       return;
     }
     try {
-      const data = await gql(`query FlightAvailability($origin:String!,$destination:String!){
-        flightAvailability(origin:$origin,destination:$destination){
+      const data = await gql(`query FlightAvailability($origin:String!,$destination:String!,$from:String,$to:String){
+        flightAvailability(origin:$origin,destination:$destination,startDate:$from,endDate:$to,limit:90){
           origin destination dates { travelDate directOfferCount connectionCandidateCount }
         }
-      }`, { origin, destination });
+      }`, { origin, destination, from: range.startDate || null, to: range.endDate || null });
       const next = data.flightAvailability || emptyFlightAvailability;
       setFlightAvailability(next);
       setFlightResults([]); setConnections([]); setPackages([]);
@@ -163,7 +173,7 @@ function App() {
   useEffect(() => {
     if (searchMode === 'packages') refreshPackageAvailability(form.origin, form.destination);
     else refreshFlightAvailability(form.origin, form.destination);
-  }, [form.origin, form.destination, searchMode]);
+  }, [form.origin, form.destination, searchMode, range.startDate, range.endDate]);
 
   useEffect(() => {
     if (searchMode === 'packages' && selectedRoute && !selectedRoute.packageAvailable) {
@@ -198,20 +208,21 @@ function App() {
     setFlightResults([]); setPackages([]);
   }
 
-  async function searchFlights(e) {
+  async function searchFlights(e, offset = 0) {
     e?.preventDefault();
     if (!selectedOutboundDate) { setNotice(routeStatusMessage(selectedRoute?.coverageStatus)); return; }
     setLoading(true); setNotice('');
     try {
-      const data = await gql(`query Flights($origin:String!,$destination:String!,$travelDate:String!){
-        flightSearch(origin:$origin,destination:$destination,travelDate:$travelDate,limit:50){
-          origin destination travelDate status availableCount sourcesChecked sourcesAvailable
+      const data = await gql(`query Flights($origin:String!,$destination:String!,$travelDate:String!,$offset:Int!){
+        flightSearch(origin:$origin,destination:$destination,travelDate:$travelDate,limit:10,offset:$offset){
+          origin destination travelDate status availableCount sourcesChecked sourcesAvailable totalCount hasMore offset
           directOffers{ id airline origin destination travelDate departureAt arrivalAt price currency source sourceUrl snapshotId scrapedAt }
           connections{ via stops totalPrice currency warning legs{ id airline origin destination travelDate departureAt arrivalAt price currency source sourceUrl snapshotId scrapedAt } }
         }
-      }`, { origin: form.origin, destination: form.destination, travelDate: selectedOutboundDate });
+      }`, { origin: form.origin, destination: form.destination, travelDate: selectedOutboundDate, offset });
       const result = data.flightSearch || { directOffers: [], connections: [], status: selectedRoute?.coverageStatus };
-      setFlightResults((result.directOffers || []).slice(0,10));
+      setFlightResults(result.directOffers || []);
+      setFlightPage({ offset: result.offset || 0, hasMore: result.hasMore || false, totalCount: result.totalCount || 0 });
       setConnections((result.connections || []).slice(0,5));
       setPackages([]);
       if (result.directOffers?.length) setNotice(routeStatusMessage(result.status));
@@ -236,9 +247,10 @@ function App() {
     try {
       const data = await gql(`query Search($origin:String!,$destination:String!,$startDate:String!,$endDate:String!){
         travelPackages(origin:$origin,destination:$destination,startDate:$startDate,endDate:$endDate){
-          id nights flightTotal total
-          outboundFlight{ id airline origin destination travelDate departureAt price currency source sourceUrl scrapedAt }
-          returnFlight{ id airline origin destination travelDate departureAt price currency source sourceUrl scrapedAt }
+          id nights flightTotal total priceBasis warnings
+          itinerary { label date origin destination departureAt arrivalAt durationMinutes timeConfirmed }
+          outboundFlight{ id airline origin destination travelDate departureAt arrivalAt price currency source sourceUrl scrapedAt }
+          returnFlight{ id airline origin destination travelDate departureAt arrivalAt price currency source sourceUrl scrapedAt }
           hotel{ id name roomType city nightlyPrice currency rating source sourceUrl scrapedAt }
           car{ id provider model category dailyPrice currency source sourceUrl scrapedAt }
         }
@@ -282,13 +294,20 @@ function App() {
   async function checkout(pkg, simulateFailure = null) {
     if (!user) { setTab('account'); setNotice('Inicia sesión antes de reservar.'); return; }
     setLoading(true); setNotice('');
+    const requestKey = `checkout:${user.id}:${pkg.id}:${simulateFailure || 'normal'}`;
+    const idempotencyKey = checkoutKeys.current[requestKey] ||= sessionStorage.getItem(requestKey) || crypto.randomUUID();
+    sessionStorage.setItem(requestKey,idempotencyKey);
     try {
-      const data = await gql(`mutation Checkout($outbound:String!,$returnFlight:String!,$hotel:String!,$car:String!,$nights:Int!,$total:Float!,$failure:String){ checkoutPackage(outboundFlightId:$outbound,returnFlightId:$returnFlight,hotelId:$hotel,carId:$car,nights:$nights,total:$total,simulateFailure:$failure){ id status paymentStatus failureReason total createdAt } }`, {
-        outbound: pkg.outboundFlight.id, returnFlight: pkg.returnFlight.id, hotel: pkg.hotel.id, car: pkg.car.id, nights: pkg.nights, total: pkg.total, failure: simulateFailure,
+      const data = await gql(`mutation Checkout($outbound:String!,$returnFlight:String!,$hotel:String!,$car:String!,$nights:Int!,$total:Float!,$failure:String,$key:String!){ checkoutPackage(idempotencyKey:$key,outboundFlightId:$outbound,returnFlightId:$returnFlight,hotelId:$hotel,carId:$car,nights:$nights,total:$total,simulateFailure:$failure){ id status paymentStatus failureReason total createdAt } }`, {
+        outbound: pkg.outboundFlight.id, returnFlight: pkg.returnFlight.id, hotel: pkg.hotel.id, car: pkg.car.id, nights: pkg.nights, total: pkg.total, failure: simulateFailure, key: idempotencyKey,
       });
+      if (["CONFIRMED", "CANCELLED"].includes(data.checkoutPackage.status)) {
+        delete checkoutKeys.current[requestKey];
+        sessionStorage.removeItem(requestKey);
+      }
       setNotice(data.checkoutPackage.status === 'CONFIRMED'
-        ? `Reserva ${data.checkoutPackage.id.slice(0,8)} confirmada. Happy path SAGA completado.`
-        : `Reserva cancelada de forma consistente: ${data.checkoutPackage.failureReason}. Revisa los eventos SAGA.`);
+        ? `Reserva local ${data.checkoutPackage.id.slice(0,8)} confirmada. No se ha reservado ni cobrado en proveedores externos.`
+        : `Estado ${data.checkoutPackage.status}: ${data.checkoutPackage.failureReason}. Revisa los eventos SAGA.`);
       await loadOrders(); setTab('orders');
     } catch (e) { setNotice(`${e.status === 429 ? 'Rate limit activo: ' : ''}${e.message}`); }
     finally { setLoading(false); }
@@ -343,10 +362,16 @@ function App() {
       <nav>{[['search','Buscar'],['orders','Reservas'],['security','Seguridad'],['account',user ? user.fullName : 'Ingresar']].map(([id,label]) => <button key={id} className={tab===id?'active':''} onClick={()=>setTab(id)}>{label}</button>)}</nav>
     </header>
     <main>
-      <section className="hero"><p className="eyebrow">PLATAFORMA TURÍSTICA DISTRIBUIDA</p><h1>{title}</h1><p>Rutas y fechas derivadas exclusivamente del catálogo scrapeado activo, procesado por Dask/Prefect y consultado por GraphQL.</p></section>
+      <section className="hero"><p className="eyebrow">PLATAFORMA TURÍSTICA DISTRIBUIDA</p><h1>{title}</h1><p>Explora cinco ciudades, compara fechas publicadas y construye un viaje con vuelos de ida y vuelta, hotel y vehículo.</p></section>
+      <div className="health-banner">Actualización cada {catalogUpdate?.intervalHours || 24} horas · Último ciclo: {catalogUpdate?.startedAt ? new Date(catalogUpdate.startedAt).toLocaleString('es-CO') : 'pendiente'} · {catalogUpdate?.status || 'NOT_RUN'}</div>
       {notice && <div className="notice">{notice}<button onClick={()=>setNotice('')}>×</button></div>}
 
       {tab==='search' && <>
+        <div className="result-filters">
+          <label>Consultar desde<input type="date" value={range.startDate} onChange={e=>setRange(r=>({...r,startDate:e.target.value}))}/></label>
+          <label>Consultar hasta<input type="date" value={range.endDate} min={range.startDate} onChange={e=>setRange(r=>({...r,endDate:e.target.value}))}/></label>
+          <small>El intervalo filtra el catálogo. Selecciona abajo las fechas publicadas.</small>
+        </div>
         <div className="mode-switch" role="group" aria-label="Modo de búsqueda">
           <button type="button" className={searchMode==='flights'?'active':''} onClick={()=>switchMode('flights')}>✈ Explorar vuelos</button>
           <button type="button" className={searchMode==='packages'?'active':''} onClick={()=>switchMode('packages')}>🧳 Armar paquete</button>
@@ -377,6 +402,7 @@ function App() {
         </>}
 
         {searchMode==='flights' && <>
+          {flightResults.length > 0 && <div className="actions"><button disabled={loading || flightPage.offset === 0} onClick={()=>searchFlights(null, Math.max(0,flightPage.offset-10))}>Anterior</button><span>{flightPage.offset + 1}–{flightPage.offset + flightResults.length} de {flightPage.totalCount} ofertas</span><button disabled={loading || !flightPage.hasMore} onClick={()=>searchFlights(null, flightPage.offset+10)}>Siguiente</button></div>}
           <section className="grid flight-grid">{visibleDirectOffers.map(flight => <article className="flight-card" key={flight.id}>
             <div className="package-top"><span>{flight.origin} → {flight.destination}</span><strong>{money(flight.price)}</strong></div>
             <h3>{flight.airline}</h3>
@@ -396,7 +422,13 @@ function App() {
           <div className="line"><span>↩</span><div><b>Regreso · {pkg.returnFlight.airline}</b><small>{pkg.returnFlight.travelDate} · {pkg.returnFlight.origin} → {pkg.returnFlight.destination} · {money(pkg.returnFlight.price)}</small><SourceBadge item={pkg.returnFlight}/></div></div>
           <div className="line"><span>⌂</span><div><b>{pkg.hotel.name}{pkg.hotel.roomType ? ` · ${pkg.hotel.roomType}` : ''}</b><small>{pkg.nights} noches · {money(pkg.hotel.nightlyPrice)} / noche{pkg.hotel.rating != null ? ` · ★ ${pkg.hotel.rating}` : ''}</small><SourceBadge item={pkg.hotel}/></div></div>
           <div className="line"><span>🚙</span><div><b>{pkg.car.model}</b><small>{pkg.car.provider}{pkg.car.category ? ` · ${pkg.car.category}` : ''} · {money(pkg.car.dailyPrice)} / día</small><SourceBadge item={pkg.car}/></div></div>
-          <div className="actions"><button className="primary" disabled={loading} onClick={()=>checkout(pkg)}>Reservar ida + vuelta</button><button className="danger" disabled={loading} onClick={()=>checkout(pkg,'return_flight')}>Demo falla regreso</button></div>
+          <div className="timeline itinerary"><h4>Itinerario · {pkg.nights} noches</h4>
+            {pkg.itinerary?.map(leg=><div className="event" key={leg.label}><span className="dot"></span><div><b>{leg.label}: {leg.origin} → {leg.destination}</b><small>{leg.date} · {leg.departureAt ? new Date(leg.departureAt).toLocaleString('es-CO') : 'Salida por confirmar'} → {leg.arrivalAt ? new Date(leg.arrivalAt).toLocaleString('es-CO') : 'Llegada por confirmar'}{leg.durationMinutes != null ? ` · ${leg.durationMinutes} minutos` : ''}</small></div></div>)}
+            <p>Estancia: {pkg.outboundFlight.travelDate} → {pkg.returnFlight.travelDate} · hotel y vehículo en {cityByCode[form.destination]?.name}</p>
+          </div>
+          <small>Total estimado para un viajero. Hotel: {money(pkg.hotel.nightlyPrice * pkg.nights)} · vehículo: {money(pkg.car.dailyPrice * pkg.nights)}. No incluye cargos no publicados.</small>
+          {pkg.warnings?.map(w=><p className="package-warning" key={w}>{w}</p>)}
+          <div className="actions"><button className="primary" disabled={loading} onClick={()=>checkout(pkg)}>Crear reserva local</button><button className="danger" disabled={loading} onClick={()=>checkout(pkg,'return_flight')}>Demo falla regreso</button></div>
         </article>)}</div>}
       </>}
 

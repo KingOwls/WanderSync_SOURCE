@@ -11,7 +11,7 @@ PRICE_RE = re.compile(r"([\d][\d.,]*)\s*COP", re.I)
 
 def _clean_hotel_name(value: str) -> str:
     value = value.strip()
-    value = re.sub(r"\s+en\s+Medell[ií]n\s*$", "", value, flags=re.I)
+    value = re.sub(r"\s+en\s+(?:Medell[ií]n|Bogot[aá]|Cali|Cartagena|Santa Marta)\s*$", "", value, flags=re.I)
     return value.strip()
 
 
@@ -29,7 +29,18 @@ def parse_hotels(html: str, metadata: SnapshotMetadata) -> list[dict]:
     page_title = " ".join(h1.stripped_strings) if h1 else ""
     hotel_name = _clean_hotel_name(page_title)
     city = _city_from_page(page_title or " ".join(soup.stripped_strings))
+    hotel_name = re.sub(r"^Habitaciones\s+", "", hotel_name, flags=re.I)
     rows: list[dict] = []
+    # Current GHL cards use paragraph titles, not heading tags.
+    for card in soup.select(".rooms-aquarius__description, .rooms-crux__description"):
+        title = card.select_one(".rooms-aquarius__title, .description__title--rooms-crux")
+        price = card.select_one(".rooms-aquarius__price-value, .rooms-crux__value")
+        match = PRICE_RE.search(price.get_text(" ", strip=True)) if price else None
+        if title and match and hotel_name and city:
+            rows.append({"name": hotel_name, "room_type": title.get_text(" ",strip=True), "city": city,
+                         "price_text": f"{match.group(1)} COP", "rating": None})
+    if rows:
+        return rows
 
     for marker in soup.find_all(string=lambda s: bool(s and s.strip().lower() == "desde")):
         tag = marker.parent if isinstance(marker.parent, Tag) else None

@@ -193,6 +193,9 @@ def persist_catalog(adapter_name: str, ref: SnapshotRef, rows: list[dict]) -> di
             raise ValueError(f"Unsupported kind: {adapter.kind}")
         for row in rows:
             cur.execute(sql, row)
+            price = row.get("price", row.get("nightly_price", row.get("daily_price")))
+            cur.execute("INSERT INTO offer_observations(kind,offer_id,snapshot_id,source,price,captured_at) VALUES(%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                        (adapter.kind, row["id"], row["snapshot_id"], adapter.name, price, row["scraped_at"]))
     return {"snapshot_id": sid, "rows": len(rows), "kind": adapter.kind, "source": adapter.name}
 
 
@@ -225,6 +228,9 @@ def persist_catalog_batch(
                  snapshot_id=EXCLUDED.snapshot_id,scraped_at=EXCLUDED.scraped_at,active=TRUE,updated_at=NOW()"""
         for row in rows:
             cur.execute(sql, row)
+            price = row.get("price", row.get("nightly_price", row.get("daily_price")))
+            cur.execute("INSERT INTO offer_observations(kind,offer_id,snapshot_id,source,price,captured_at) VALUES(%s,%s,%s,%s,%s,%s) ON CONFLICT DO NOTHING",
+                        (adapter.kind, row["id"], row["snapshot_id"], adapter.name, price, row["scraped_at"]))
     return {"snapshot_id": snapshot_ids[0] if snapshot_ids else None, "snapshot_ids": snapshot_ids,
             "rows": len(rows), "kind": adapter.kind, "source": adapter.name}
 
@@ -234,6 +240,12 @@ def _dask_call(fn, *args):
     with Client(DASK_SCHEDULER, timeout="20s") as client:
         future = client.submit(fn, *args, pure=False)
         return client.gather(future)
+
+
+def record_route_result(request, status, *, items=0, snapshot_id=None, error=None):
+    with _connect() as conn:
+        conn.execute("INSERT INTO scrape_route_runs(source,origin,destination,source_url,status,items_found,snapshot_id,error_message) VALUES(%s,%s,%s,%s,%s,%s,%s,%s)",
+                     (request.source, request.query["origin"], request.query["destination"], request.url, status, items, snapshot_id, error))
 
 
 def collect_source_batch(adapter_name: str) -> dict:
@@ -261,6 +273,7 @@ def collect_source_batch(adapter_name: str) -> dict:
             if decision is not None:
                 captured_by_request_url[request.url] = decision
             else:
+                record_route_result(request, "SOURCE_UNAVAILABLE", error=error_text)
                 request_errors.append({"url": request.url, "error": "ROBOTS_DISALLOWED" if policy_blocked else error_text, **({"policy_blocked": True} if policy_blocked else {})})
 
     # Preserve deterministic registry order even when requests complete concurrently.
@@ -294,6 +307,9 @@ def parse_source_batch(state: dict) -> dict:
             rows = _dask_call(parse_snapshot, state["adapter"], decision.snapshot)
             parsed.append((decision, rows))
         except Exception as exc:
+            request = next((r for r in get_adapter(state["adapter"]).build_requests() if snapshot_key(r) == decision.snapshot.metadata.query_hash), None)
+            if request:
+                record_route_result(request, "SOURCE_CHANGED", snapshot_id=snapshot_identity(decision.snapshot), error=str(exc))
             state.setdefault("request_errors", []).append({"url": decision.snapshot.metadata.source_url, "error": str(exc)})
     if not parsed:
         state["error"] = "No route snapshot produced parseable rows"
@@ -309,7 +325,7 @@ def normalize_source_batch(state: dict) -> dict:
         return state
     adapter = get_adapter(state["adapter"])
     request_routes = {
-        request.url: (request.query.get("origin"), request.query.get("destination"))
+        snapshot_key(request): (request.query.get("origin"), request.query.get("destination"))
         for request in adapter.build_requests()
     }
     normalized = []
@@ -323,7 +339,7 @@ def normalize_source_batch(state: dict) -> dict:
                 "url": decision.snapshot.metadata.source_url,
                 "error": "No valid normalized rows for route snapshot",
             })
-            route = request_routes.get(decision.snapshot.metadata.source_url)
+            route = request_routes.get(decision.snapshot.metadata.query_hash) or next(((r.query.get("origin"), r.query.get("destination")) for r in adapter.build_requests() if r.url == decision.snapshot.metadata.source_url), None)
             if route and route[0] and route[1]:
                 empty_routes.append((str(route[0]), str(route[1])))
     state["normalized_captures"] = normalized
@@ -400,6 +416,14 @@ def _persist_stage(state: dict) -> SourceRunResult:
         diagnostics = "; ".join(item["error"] for item in state.get("request_errors", [])) or None
         first_ref = decisions[0].snapshot
         persisted_snapshot_id = persisted["snapshot_id"] or snapshot_identity(first_ref)
+        for request in adapter.build_requests():
+            decision = next((d for d in state.get("captures", []) if d.snapshot.metadata.query_hash == snapshot_key(request)), None)
+            if decision is None:
+                continue
+            count = sum(1 for row in state["rows"] if row["origin"] == request.query["origin"] and row["destination"] == request.query["destination"])
+            failed = any(item["url"] in {request.url, decision.snapshot.metadata.source_url} for item in state.get("request_errors", []))
+            record_route_result(request, "SOURCE_CHANGED" if failed else decision.status, items=count,
+                                snapshot_id=snapshot_identity(decision.snapshot), error="Parser or normalization failed" if failed else decision.error_message)
         _finish_run(state["run_id"], status, snapshot_id=persisted_snapshot_id, items=persisted["rows"], error=diagnostics)
         return SourceRunResult(adapter.name, adapter.kind, status, persisted["rows"], str(first_ref.html_path), diagnostics)
     persisted = _dask_call(persist_catalog, state["adapter"], state["decision"].snapshot, state["rows"])
@@ -494,6 +518,16 @@ def _partial_failure_result(adapter_name: str, exc: Exception) -> SourceRunResul
     return SourceRunResult(adapter.name, adapter.kind, "SOURCE_UNAVAILABLE", 0, error_message=error_message)
 
 
+@task(name="collect city service", retries=2, retry_delay_seconds=10)
+def collect_city_source(name): return _prefect_collect(name)
+@task(name="parse city service")
+def parse_city_source(state): return _parse_stage(state)
+@task(name="normalize city service")
+def normalize_city_source(state): return _normalize_stage(state)
+@task(name="persist city service")
+def persist_city_source(state): return _persist_stage(state)
+
+
 @flow(name="WanderSync real scraping ingestion", retries=1, retry_delay_seconds=15, log_prints=True)
 def travel_scraping_flow():
     # Submit independent source chains before waiting so Prefect/Dask can use both workers.
@@ -511,6 +545,14 @@ def travel_scraping_flow():
         futures.append(("ghl_porton_medellin", _submit_chain(collect_hotels, parse_hotels_task, normalize_hotels_task, persist_hotels_task)))
     if "alkilautos_national_medellin" in enabled:
         futures.append(("alkilautos_national_medellin", _submit_chain(collect_cars, parse_cars_task, normalize_cars_task, persist_cars_task)))
+
+    for adapter in get_enabled_adapters():
+        if adapter.name in {name for name, _ in futures}:
+            continue
+        collected = _submit_task(collect_city_source, adapter.name)
+        parsed = _submit_task(parse_city_source, collected)
+        normalized = _submit_task(normalize_city_source, parsed)
+        futures.append((adapter.name, _submit_task(persist_city_source, normalized)))
 
     results: list[SourceRunResult] = []
     for adapter_name, future in futures:

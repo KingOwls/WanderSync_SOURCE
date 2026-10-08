@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 from ingestion.collectors.base import SourceBlockedError, SourceChangedError, SourceUnavailableError
 from ingestion.models import CaptureResult, ScrapeRequest, SnapshotMetadata
-from ingestion.policies.pacing import mark_source_run, pacing_delay, source_lock
+from ingestion.policies.pacing import mark_source_run, pacing_delay, source_lock, shared_pacing_delay, mark_shared_source_run
 from ingestion.policies.robots import USER_AGENT, robots_allowed
 from ingestion.policies.retry import backoff_seconds, retry_after_seconds, should_retry_status
 from ingestion.snapshots.manager import save_snapshot
@@ -84,9 +84,10 @@ def collect_html(request: ScrapeRequest, snapshot_root: str | Path, timeout_seco
     retry_limit = int(os.getenv("SCRAPE_RETRY_LIMIT", "2"))
 
     with source_lock(request.source, snapshot_root):
-        delay = pacing_delay(request.source, min_interval, max_interval)
+        delay = max(pacing_delay(request.source, min_interval, max_interval), shared_pacing_delay(request.source, snapshot_root, min_interval, max_interval))
         if delay:
             time.sleep(delay)
+        mark_shared_source_run(request.source, snapshot_root)
         last_error: Exception | None = None
         for attempt in range(1, retry_limit + 2):
             try:

@@ -11,14 +11,25 @@ def normalize_flight(raw: dict, *, source: str, source_url: str, snapshot_id: st
     airline = clean(raw.get("airline") or "")
     if not airline or len(origin) != 3 or len(destination) != 3 or not travel_date or price is None:
         return None
+    from datetime import datetime
+    observed_times = {}
+    try:
+        for field in ("departure_at", "arrival_at"):
+            value = raw.get(field)
+            parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00")) if value else None
+            if parsed and parsed.tzinfo is None:
+                return None
+            observed_times[field] = parsed.isoformat() if parsed else None
+    except ValueError:
+        return None
     return {
         "id": stable_id("FL", source, origin, destination, travel_date, price, airline),
         "airline": airline,
         "origin": origin,
         "destination": destination,
         "travel_date": travel_date,
-        "departure_at": raw.get("departure_at"),
-        "arrival_at": raw.get("arrival_at"),
+        "departure_at": observed_times["departure_at"],
+        "arrival_at": observed_times["arrival_at"],
         "price": price,
         "currency": "COP",
         "source": source,

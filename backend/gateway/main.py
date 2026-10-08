@@ -1,6 +1,7 @@
 import asyncio
 import json
 from datetime import date
+from common.journey import itinerary, validate_journey
 from typing import Optional
 
 import httpx
@@ -188,6 +189,17 @@ class FlightSearchResult:
     sources_available: int
     direct_offers: list[Flight]
     connections: list[SuggestedConnection]
+    total_count: int = 0
+    has_more: bool = False
+    offset: int = 0
+
+
+@strawberry.type
+class CatalogUpdate:
+    started_at: Optional[str]
+    finished_at: Optional[str]
+    status: str
+    interval_hours: int
 
 
 @strawberry.type
@@ -207,6 +219,18 @@ class SourceHealthSummary:
 
 
 @strawberry.type
+class ItineraryLeg:
+    label: str
+    date: str
+    origin: str
+    destination: str
+    departure_at: Optional[str]
+    arrival_at: Optional[str]
+    duration_minutes: Optional[int]
+    time_confirmed: bool
+
+
+@strawberry.type
 class TravelPackage:
     id: str
     outbound_flight: Flight
@@ -216,6 +240,9 @@ class TravelPackage:
     nights: int
     flight_total: float
     total: float
+    itinerary: list[ItineraryLeg]
+    warnings: list[str]
+    price_basis: str = "PUBLIC_STARTING_RATE_ESTIMATE"
 
 
 @strawberry.type
@@ -366,7 +393,7 @@ def _to_booking(row: dict) -> Booking:
 def _source_health_data() -> dict:
     rows = fetch_all(
         """SELECT DISTINCT ON (source) source,status,items_found,finished_at
-           FROM scrape_runs WHERE source = ANY(%s)
+           FROM scrape_runs WHERE finished_at >= NOW() - INTERVAL '48 hours' AND source = ANY(%s)
            ORDER BY source,id DESC""",
         (list(ACTIVE_FLIGHT_SOURCES),),
     )
@@ -377,8 +404,50 @@ def _health_map(summary: dict) -> dict[str, str]:
     return {item["source"]: item["status"] for item in summary["sources"]}
 
 
+async def _flight_rows(client, params):
+    rows = []
+    for offset in range(0, 10000, 1000):
+        response = await client.get(f"{FLIGHT_SERVICE_URL}/flights", params={**params, "limit": 1000, "offset": offset})
+        response.raise_for_status()
+        batch = response.json()
+        rows.extend(batch)
+        if len(batch) < 1000:
+            return rows
+    raise GraphQLError("Too many results; narrow the date range", extensions={"code": "BAD_USER_INPUT"})
+
+
+def _date_range(start_date=None, end_date=None):
+    try:
+        if start_date: date.fromisoformat(start_date)
+        if end_date: date.fromisoformat(end_date)
+        if start_date and end_date and end_date < start_date: raise ValueError()
+    except ValueError as exc:
+        raise GraphQLError("Use a valid date range in YYYY-MM-DD", extensions={"code": "BAD_USER_INPUT"}) from exc
+    return {k: v for k, v in {"start_date": start_date, "end_date": end_date}.items() if v}
+
+
+def _route_health(origin, destination):
+    rows = fetch_all("""SELECT DISTINCT ON (source,origin,destination) source,status,origin,destination,checked_at
+                        FROM scrape_route_runs WHERE checked_at >= NOW() - INTERVAL '48 hours' AND origin = ANY(%s) AND destination = ANY(%s)
+                        ORDER BY source,origin,destination,id DESC""",
+                     (list(resolve_location(origin).flight_airports), list(resolve_location(destination).flight_airports)))
+    # Never infer a route's success from a source-wide result.
+    statuses = {}
+    for row in rows:
+        statuses[row["source"]] = row["status"] if row["checked_at"] else "NOT_RUN"
+    return statuses
+
+
 @strawberry.type
 class Query:
+    @strawberry.field
+    def catalog_update(self) -> CatalogUpdate:
+        row = fetch_one("SELECT started_at,finished_at,status FROM ingestion_cycles ORDER BY id DESC LIMIT 1")
+        import os
+        return CatalogUpdate(started_at=str(row["started_at"]) if row else None,
+                             finished_at=str(row["finished_at"]) if row and row["finished_at"] else None,
+                             status=row["status"] if row else "NOT_RUN", interval_hours=int(os.getenv("INGEST_INTERVAL_SECONDS", "86400")) // 3600)
+
     @strawberry.field
     async def session_info(self, info: Info) -> SessionInfo:
         sid, session = await _ensure_anonymous_session(info.context["request"], info.context["response"])
@@ -440,6 +509,17 @@ class Query:
             flag_pairs = await asyncio.gather(*(service_flags(code) for code in TOURIST_CITY_NAMES))
 
         network = build_travel_network(route_rows, dict(flag_pairs), health_map, ACTIVE_FLIGHT_SOURCES)
+        from dataclasses import replace
+        summaries = []
+        for route in network.routes:
+            health = _route_health(route.origin, route.destination)
+            checked = sum(s not in {"NOT_RUN", "RUNNING"} for s in health.values())
+            available = sum(s in {"SUCCESS", "CACHED", "STALE_FALLBACK"} for s in health.values())
+            status = route.coverage_status
+            if not route.raw_offer_count:
+                status = "NO_OFFERS" if health and available == len(health) else "SOURCE_UNAVAILABLE"
+            summaries.append(replace(route, coverage_status=status, sources_checked=checked, sources_available=available))
+        network = replace(network, routes=tuple(summaries))
         return TravelNetwork(
             cities=[TravelCity(code=code, name=TOURIST_CITY_NAMES[code], airports=list(resolve_location(code).flight_airports)) for code in network.cities],
             routes=[TravelRoute(
@@ -460,48 +540,49 @@ class Query:
         )
 
     @strawberry.field
-    async def flight_availability(self, origin: str, destination: str) -> FlightAvailabilityResult:
-        origin_location = resolve_location(origin)
-        destination_location = resolve_location(destination)
+    async def flight_availability(self, origin: str, destination: str, start_date: Optional[str] = None, end_date: Optional[str] = None, limit: int = 90) -> FlightAvailabilityResult:
+        origin_location, destination_location = resolve_location(origin), resolve_location(destination)
         if origin_location.city_code == destination_location.city_code:
             raise GraphQLError("Origin and destination must be different", extensions={"code": "BAD_USER_INPUT"})
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            direct_r, outgoing_r, incoming_r = await asyncio.gather(
-                client.get(f"{FLIGHT_SERVICE_URL}/flights", params={"origins": ",".join(origin_location.flight_airports), "destinations": ",".join(destination_location.flight_airports), "limit": 100}),
-                client.get(f"{FLIGHT_SERVICE_URL}/flights", params={"origins": ",".join(origin_location.flight_airports), "limit": 100}),
-                client.get(f"{FLIGHT_SERVICE_URL}/flights", params={"destinations": ",".join(destination_location.flight_airports), "limit": 100}),
+        interval = _date_range(start_date, end_date)
+        async with httpx.AsyncClient(timeout=15) as client:
+            direct_rows, outgoing_rows, incoming_rows = await asyncio.gather(
+                _flight_rows(client, {**interval, "origins": ",".join(origin_location.flight_airports), "destinations": ",".join(destination_location.flight_airports)}),
+                _flight_rows(client, {**interval, "origins": ",".join(origin_location.flight_airports)}),
+                _flight_rows(client, {**interval, "destinations": ",".join(destination_location.flight_airports)}),
             )
-            for response in (direct_r, outgoing_r, incoming_r): response.raise_for_status()
-        direct_rows, outgoing_rows, incoming_rows = direct_r.json(), outgoing_r.json(), incoming_r.json()
-        dates = sorted({str(row.get("travel_date")) for row in direct_rows if row.get("travel_date")} | {str(row.get("travel_date")) for row in outgoing_rows if row.get("travel_date")} & {str(row.get("travel_date")) for row in incoming_rows if row.get("travel_date")})
-        options: list[FlightDateOption] = []
+        dates = sorted({str(r["travel_date"]) for r in direct_rows} | ({str(r["travel_date"]) for r in outgoing_rows} & {str(r["travel_date"]) for r in incoming_rows}))
+        options = []
         for day in dates:
-            direct_count = len(select_direction_offers([r for r in direct_rows if str(r.get("travel_date")) == day], origin=origin_location.city_code, destination=destination_location.city_code, limit=10))
-            connections = build_suggested_connections(outgoing_rows, incoming_rows, origin=origin_location.city_code, destination=destination_location.city_code, travel_date=day, limit=10)
+            direct_count = len(select_direction_offers([r for r in direct_rows if r["travel_date"] == day], origin=origin_location.city_code, destination=destination_location.city_code, limit=1000))
+            connections = build_suggested_connections(outgoing_rows, incoming_rows, origin=origin_location.city_code, destination=destination_location.city_code, travel_date=day)
             if direct_count or connections:
                 options.append(FlightDateOption(travel_date=day, direct_offer_count=direct_count, connection_candidate_count=len(connections)))
-            if len(options) >= 10: break
+            if len(options) >= min(max(limit, 1), 366): break
         return FlightAvailabilityResult(origin=origin_location.city_code, destination=destination_location.city_code, dates=options)
 
     @strawberry.field
-    async def flight_search(self, origin: str, destination: str, travel_date: str, limit: int = 20) -> FlightSearchResult:
+    async def flight_search(self, origin: str, destination: str, travel_date: str, limit: int = 10, offset: int = 0) -> FlightSearchResult:
         origin_location = resolve_location(origin)
         destination_location = resolve_location(destination)
         if origin_location.city_code == destination_location.city_code:
             raise GraphQLError("Origin and destination must be different", extensions={"code": "BAD_USER_INPUT"})
         health_summary = _source_health_data()
-        health_map = _health_map(health_summary)
+        health_map = _route_health(origin, destination)
         async with httpx.AsyncClient(timeout=8.0) as client:
             direct_r = await client.get(f"{FLIGHT_SERVICE_URL}/flights", params={
                 "origins": ",".join(origin_location.flight_airports), "destinations": ",".join(destination_location.flight_airports),
                 "travel_date": travel_date, "limit": 100,
             })
             direct_r.raise_for_status()
-            direct_rows = direct_r.json()
-            direct_offers = select_direction_offers(direct_rows, origin=origin_location.city_code, destination=destination_location.city_code, limit=10)
-            coverage = build_direction_coverage(direct_rows, origin=origin_location.city_code, destination=destination_location.city_code, source_health=health_map, expected_sources=ACTIVE_FLIGHT_SOURCES, limit=10)
-            if direct_offers:
-                return FlightSearchResult(origin=origin_location.city_code, destination=destination_location.city_code, travel_date=travel_date, status=coverage.status, available_count=len(direct_offers), sources_checked=coverage.sources_checked, sources_available=coverage.sources_available, direct_offers=[_to_flight(row) for row in direct_offers], connections=[])
+            direct_rows = await _flight_rows(client, {"origins": ",".join(origin_location.flight_airports), "destinations": ",".join(destination_location.flight_airports), "travel_date": travel_date})
+            all_offers = select_direction_offers(direct_rows, origin=origin_location.city_code, destination=destination_location.city_code, limit=10000)
+            offset = max(offset, 0)
+            page_size = min(max(limit, 1), 100)
+            direct_offers = all_offers[offset:offset + page_size]
+            coverage = build_direction_coverage(direct_rows, origin=origin_location.city_code, destination=destination_location.city_code, source_health=health_map, expected_sources=tuple(health_map) or ACTIVE_FLIGHT_SOURCES, limit=10)
+            if all_offers:
+                return FlightSearchResult(origin=origin_location.city_code, destination=destination_location.city_code, travel_date=travel_date, status=coverage.status, available_count=len(direct_offers), sources_checked=coverage.sources_checked, sources_available=coverage.sources_available, direct_offers=[_to_flight(row) for row in direct_offers], connections=[], total_count=len(all_offers), has_more=offset + len(direct_offers) < len(all_offers), offset=offset)
             outgoing_r, incoming_r = await asyncio.gather(
                 client.get(f"{FLIGHT_SERVICE_URL}/flights", params={"origins": ",".join(origin_location.flight_airports), "travel_date": travel_date, "limit": 100}),
                 client.get(f"{FLIGHT_SERVICE_URL}/flights", params={"destinations": ",".join(destination_location.flight_airports), "travel_date": travel_date, "limit": 100}),
@@ -517,36 +598,21 @@ class Query:
         self,
         origin: str,
         destination: str,
-        outbound_limit: int = 8,
-        return_limit: int = 8,
+        outbound_limit: int = 90,
+        return_limit: int = 90,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
     ) -> TravelAvailability:
         origin_location = resolve_location(origin)
         destination_location = resolve_location(destination)
         if origin_location.city_code == destination_location.city_code:
             raise GraphQLError("Origin and destination must be different", extensions={"code": "BAD_USER_INPUT"})
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            outbound_r, return_r = await asyncio.gather(
-                client.get(
-                    f"{FLIGHT_SERVICE_URL}/flights",
-                    params={
-                        "origins": ",".join(origin_location.flight_airports),
-                        "destinations": ",".join(destination_location.flight_airports),
-                        "limit": 100,
-                    },
-                ),
-                client.get(
-                    f"{FLIGHT_SERVICE_URL}/flights",
-                    params={
-                        "origins": ",".join(destination_location.flight_airports),
-                        "destinations": ",".join(origin_location.flight_airports),
-                        "limit": 100,
-                    },
-                ),
+        interval = _date_range(start_date, end_date)
+        async with httpx.AsyncClient(timeout=15) as client:
+            outbound_rows, return_rows = await asyncio.gather(
+                _flight_rows(client, {**interval, "origins": ",".join(origin_location.flight_airports), "destinations": ",".join(destination_location.flight_airports)}),
+                _flight_rows(client, {**interval, "origins": ",".join(destination_location.flight_airports), "destinations": ",".join(origin_location.flight_airports)}),
             )
-            outbound_r.raise_for_status()
-            return_r.raise_for_status()
-        outbound_rows = outbound_r.json()
-        return_rows = return_r.json()
         result = build_availability(outbound_rows, return_rows, outbound_limit, return_limit)
         airports = sorted({str(row.get("destination", "")).upper() for row in outbound_rows if row.get("destination")})
         return TravelAvailability(
@@ -614,10 +680,15 @@ class Query:
         )
         packages: list[TravelPackage] = []
         for candidate in candidates:
+            try:
+                validate_journey(candidate.outbound, candidate.return_flight, candidate.hotel, candidate.car, nights)
+            except ValueError:
+                continue
             outbound = _to_flight(candidate.outbound)
             return_flight = _to_flight(candidate.return_flight)
             hotel = _to_hotel(candidate.hotel)
             car = _to_car(candidate.car)
+            legs, warnings = itinerary(candidate.outbound, candidate.return_flight, nights)
             packages.append(TravelPackage(
                 id=f"{outbound.id}:{return_flight.id}:{hotel.id}:{car.id}:{nights}",
                 outbound_flight=outbound,
@@ -627,6 +698,8 @@ class Query:
                 nights=nights,
                 flight_total=candidate.flight_total,
                 total=candidate.total,
+                itinerary=[ItineraryLeg(**leg) for leg in legs],
+                warnings=warnings,
             ))
         return packages
 
@@ -756,6 +829,7 @@ class Mutation:
         info: Info,
         outbound_flight_id: str,
         return_flight_id: str,
+        idempotency_key: str,
         hotel_id: str,
         car_id: str,
         nights: int,
@@ -773,6 +847,7 @@ class Mutation:
                 f"{ORDER_SERVICE_URL}/checkout",
                 json={
                     "user_id": user_id,
+                    "idempotency_key": idempotency_key,
                     "outbound_flight_id": outbound_flight_id,
                     "return_flight_id": return_flight_id,
                     "hotel_id": hotel_id,

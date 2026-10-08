@@ -19,7 +19,8 @@ def test_default_source_registry_enables_four_flight_sources_without_latam(monke
     import ingestion.sources.registry as registry
     monkeypatch.delenv("SCRAPE_ENABLED_SOURCES", raising=False)
     names = [adapter.name for adapter in registry.get_enabled_adapters()]
-    assert names == ["clicair", "satena", "jetsmart", "wingo", "ghl_porton_medellin", "alkilautos_national_medellin"]
+    assert names[:6] == ["clicair", "satena", "jetsmart", "wingo", "ghl_porton_medellin", "alkilautos_national_medellin"]
+    assert len(names) == 14
     assert "latam" in registry._ADAPTERS  # importable only for historical evidence
     assert "latam" not in names
 

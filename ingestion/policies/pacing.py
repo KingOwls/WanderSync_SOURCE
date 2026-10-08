@@ -49,3 +49,18 @@ def source_lock(source: str, root: str | Path):
             except ImportError:
                 pass
             lock_file.close()
+
+
+def shared_pacing_delay(source, root, minimum_seconds, maximum_seconds):
+    path = Path(root) / ".locks" / f"{source}.last"
+    try:
+        last = float(path.read_text())
+    except (FileNotFoundError, ValueError):
+        return 0
+    return max(0, random.uniform(minimum_seconds, maximum_seconds) - (time.time() - last))
+
+
+def mark_shared_source_run(source, root):
+    path = Path(root) / ".locks" / f"{source}.last"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(str(time.time()))

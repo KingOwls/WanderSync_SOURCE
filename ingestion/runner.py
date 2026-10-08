@@ -10,7 +10,7 @@ from ingestion.sources.registry import get_enabled_adapters
 PREFECT_API_URL = os.getenv("PREFECT_API_URL", "http://prefect-server:4200/api")
 DASK_SCHEDULER = os.getenv("DASK_SCHEDULER", "tcp://dask-scheduler:8786")
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://wandersync:wandersync_dev_password@postgres:5432/wandersync")
-INTERVAL = int(os.getenv("INGEST_INTERVAL_SECONDS", "900"))
+INTERVAL = int(os.getenv("INGEST_INTERVAL_SECONDS", "86400"))
 RUN_ONCE = os.getenv("INGEST_RUN_ONCE", "false").lower() == "true"
 
 
@@ -61,14 +61,45 @@ def wait_for_dependencies():
         time.sleep(3)
 
 
+def seconds_until_next_run(now=None):
+    from datetime import datetime, timezone
+    now = now or datetime.now(timezone.utc)
+    import psycopg
+    with psycopg.connect(DATABASE_URL) as conn:
+        row = conn.execute("SELECT MAX(started_at) FROM ingestion_cycles WHERE status <> 'INTERRUPTED'").fetchone()
+    if not row or not row[0]:
+        return 0
+    return max(0, INTERVAL - (now - row[0]).total_seconds())
+
+
+def run_cycle():
+    import psycopg
+    # Advisory lock prevents two runners from updating the same catalog concurrently.
+    with psycopg.connect(DATABASE_URL, autocommit=True) as conn:
+        if not conn.execute("SELECT pg_try_advisory_lock(240024)").fetchone()[0]:
+            return
+        conn.execute("UPDATE ingestion_cycles SET status='INTERRUPTED',finished_at=NOW() WHERE status='RUNNING'")
+        if not RUN_ONCE and seconds_until_next_run() > 0:
+            return
+        cycle_id = conn.execute("INSERT INTO ingestion_cycles(status) VALUES('RUNNING') RETURNING id").fetchone()[0]
+        try:
+            results = travel_scraping_flow()
+            status = 'PARTIAL' if any(r.status == 'SOURCE_UNAVAILABLE' for r in results) else 'SUCCESS'
+            conn.execute("UPDATE ingestion_cycles SET status=%s,finished_at=NOW() WHERE id=%s", (status, cycle_id))
+        except Exception as exc:
+            conn.execute("UPDATE ingestion_cycles SET status='FAILED',finished_at=NOW(),detail=%s WHERE id=%s", (str(exc), cycle_id))
+            raise
+
+
 if __name__ == "__main__":
     wait_for_dependencies()
     while True:
         try:
-            travel_scraping_flow()
+            run_cycle()
         except Exception as exc:
             print(f"Real scraping run failed after bounded retries: {exc}")
         if RUN_ONCE:
             break
-        print(f"Next scraping ingestion in {INTERVAL} seconds")
-        time.sleep(INTERVAL)
+        remaining = seconds_until_next_run()
+        print(f"Next scraping ingestion in {remaining:.0f} seconds")
+        time.sleep(min(max(remaining, 5), 60))

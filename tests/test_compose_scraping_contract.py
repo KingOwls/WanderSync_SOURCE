@@ -18,7 +18,7 @@ def test_compose_has_no_mock_provider_or_provider_url():
 def test_scraping_services_share_snapshots_and_exact_productive_source_defaults():
     compose = load_compose()
     assert 'scrape_snapshots' in compose['volumes']
-    expected_sources = '${SCRAPE_ENABLED_SOURCES:-clicair,satena,jetsmart,wingo,ghl_porton_medellin,alkilautos_national_medellin}'
+    expected_sources = '${SCRAPE_ENABLED_SOURCES:-clicair,satena,jetsmart,wingo,ghl_porton_medellin,alkilautos_national_medellin,ghl_bogota,spiwak_cali,ghl_cartagena,ghl_santa_marta,alkilautos_national_bogota,alkilautos_national_cali,alkilautos_national_cartagena,alkilautos_national_santa_marta}'
     for service_name in ('ingestion-runner', 'dask-worker-1', 'dask-worker-2'):
         service = compose['services'][service_name]
         assert 'scrape_snapshots:/data/snapshots' in service.get('volumes', [])

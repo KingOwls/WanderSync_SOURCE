@@ -233,3 +233,22 @@ ALTER TABLE cars ALTER COLUMN source SET NOT NULL;
 ALTER TABLE cars ALTER COLUMN source_url SET NOT NULL;
 ALTER TABLE cars ALTER COLUMN snapshot_id SET NOT NULL;
 ALTER TABLE cars ALTER COLUMN scraped_at SET NOT NULL;
+
+CREATE TABLE IF NOT EXISTS ingestion_cycles (
+    id BIGSERIAL PRIMARY KEY, started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    finished_at TIMESTAMPTZ, status TEXT NOT NULL, detail TEXT
+);
+CREATE TABLE IF NOT EXISTS scrape_route_runs (
+    id BIGSERIAL PRIMARY KEY, source TEXT NOT NULL, origin TEXT NOT NULL, destination TEXT NOT NULL,
+    source_url TEXT NOT NULL, status TEXT NOT NULL, items_found INTEGER NOT NULL DEFAULT 0,
+    snapshot_id TEXT, error_message TEXT, checked_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_route_runs_latest ON scrape_route_runs(origin,destination,source,id DESC);
+CREATE TABLE IF NOT EXISTS offer_observations (
+    kind TEXT NOT NULL, offer_id TEXT NOT NULL, snapshot_id TEXT NOT NULL,
+    source TEXT NOT NULL, price NUMERIC(12,2) NOT NULL, captured_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY(kind,offer_id,snapshot_id)
+);
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+ALTER TABLE orders ADD COLUMN IF NOT EXISTS request_hash TEXT;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_idempotency ON orders(user_id,idempotency_key) WHERE idempotency_key IS NOT NULL;

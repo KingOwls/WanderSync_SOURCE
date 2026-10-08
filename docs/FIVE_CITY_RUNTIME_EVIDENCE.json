@@ -1,0 +1,162 @@
+{
+  "BOG": {
+    "origin": "MDE",
+    "start": "2026-10-22",
+    "end": "2026-11-01",
+    "package": {
+      "total": 5183500.0,
+      "nights": 10,
+      "priceBasis": "PUBLIC_STARTING_RATE_ESTIMATE",
+      "hotel": {
+        "city": "BOG",
+        "source": "ghl_bogota"
+      },
+      "car": {
+        "city": "BOG",
+        "source": "alkilautos_national_bogota"
+      },
+      "itinerary": [
+        {
+          "label": "Ida",
+          "date": "2026-10-22",
+          "departureAt": null,
+          "arrivalAt": null
+        },
+        {
+          "label": "Regreso",
+          "date": "2026-11-01",
+          "departureAt": null,
+          "arrivalAt": null
+        }
+      ]
+    }
+  },
+  "MDE": {
+    "origin": "BOG",
+    "start": "2026-10-18",
+    "end": "2026-10-22",
+    "package": {
+      "total": 2981300.0,
+      "nights": 4,
+      "priceBasis": "PUBLIC_STARTING_RATE_ESTIMATE",
+      "hotel": {
+        "city": "MDE",
+        "source": "ghl_porton_medellin"
+      },
+      "car": {
+        "city": "MDE",
+        "source": "alkilautos_national_medellin"
+      },
+      "itinerary": [
+        {
+          "label": "Ida",
+          "date": "2026-10-18",
+          "departureAt": null,
+          "arrivalAt": null
+        },
+        {
+          "label": "Regreso",
+          "date": "2026-10-22",
+          "departureAt": null,
+          "arrivalAt": null
+        }
+      ]
+    }
+  },
+  "CLO": {
+    "origin": "BOG",
+    "start": "2027-04-27",
+    "end": "2027-04-29",
+    "package": {
+      "total": 1651274.0,
+      "nights": 2,
+      "priceBasis": "PUBLIC_STARTING_RATE_ESTIMATE",
+      "hotel": {
+        "city": "CLO",
+        "source": "spiwak_cali"
+      },
+      "car": {
+        "city": "CLO",
+        "source": "alkilautos_national_cali"
+      },
+      "itinerary": [
+        {
+          "label": "Ida",
+          "date": "2027-04-27",
+          "departureAt": null,
+          "arrivalAt": null
+        },
+        {
+          "label": "Regreso",
+          "date": "2027-04-29",
+          "departureAt": null,
+          "arrivalAt": null
+        }
+      ]
+    }
+  },
+  "CTG": {
+    "origin": "MDE",
+    "start": "2026-10-24",
+    "end": "2026-10-31",
+    "package": {
+      "total": 6408362.0,
+      "nights": 7,
+      "priceBasis": "PUBLIC_STARTING_RATE_ESTIMATE",
+      "hotel": {
+        "city": "CTG",
+        "source": "ghl_cartagena"
+      },
+      "car": {
+        "city": "CTG",
+        "source": "alkilautos_national_cartagena"
+      },
+      "itinerary": [
+        {
+          "label": "Ida",
+          "date": "2026-10-24",
+          "departureAt": null,
+          "arrivalAt": null
+        },
+        {
+          "label": "Regreso",
+          "date": "2026-10-31",
+          "departureAt": null,
+          "arrivalAt": null
+        }
+      ]
+    }
+  },
+  "SMR": {
+    "origin": "BOG",
+    "start": "2026-12-07",
+    "end": "2026-12-13",
+    "package": {
+      "total": 7602364.0,
+      "nights": 6,
+      "priceBasis": "PUBLIC_STARTING_RATE_ESTIMATE",
+      "hotel": {
+        "city": "SMR",
+        "source": "ghl_santa_marta"
+      },
+      "car": {
+        "city": "SMR",
+        "source": "alkilautos_national_santa_marta"
+      },
+      "itinerary": [
+        {
+          "label": "Ida",
+          "date": "2026-12-07",
+          "departureAt": null,
+          "arrivalAt": null
+        },
+        {
+          "label": "Regreso",
+          "date": "2026-12-13",
+          "departureAt": null,
+          "arrivalAt": null
+        }
+      ]
+    }
+  }
+}

@@ -25,7 +25,7 @@ def list_hotels(city: str, limit: int = 50):
     return fetch_all(
         """SELECT id, name, room_type, city, nightly_price::float AS nightly_price,
                   currency, rating::float AS rating, source, source_url, snapshot_id, scraped_at
-           FROM hotels WHERE city=%s AND active=TRUE
+           FROM hotels WHERE city=%s AND active=TRUE AND scraped_at >= NOW() - INTERVAL '48 hours'
            ORDER BY nightly_price ASC LIMIT %s""",
         (city.upper(), min(max(limit, 1), 100)),
     )
@@ -37,10 +37,16 @@ def reserve(req: ReservationRequest):
     reservation_id = str(uuid.uuid4())
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id FROM hotels WHERE id=%s AND active=TRUE FOR UPDATE", (req.item_id,))
+            order = cur.execute("SELECT status FROM orders WHERE id=%s FOR UPDATE", (req.order_id,)).fetchone()
+            if not order or order["status"] != "PROCESSING":
+                raise HTTPException(409, "Order is not processing")
+            cur.execute("SELECT id FROM hotels WHERE id=%s AND active=TRUE AND scraped_at >= NOW() - INTERVAL '48 hours' FOR UPDATE", (req.item_id,))
             row = cur.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Active scraped hotel offer not found")
+            existing = cur.execute("SELECT id::text AS id FROM hotel_reservations WHERE order_id=%s AND hotel_id=%s AND status='HELD'", (req.order_id, req.item_id)).fetchone()
+            if existing:
+                return {"reservation_id": existing["id"], "status": "HELD", "scope": "WANDERSYNC_LOCAL_HOLD"}
             cur.execute(
                 "INSERT INTO hotel_reservations(id, order_id, hotel_id, status) VALUES(%s,%s,%s,'HELD')",
                 (reservation_id, req.order_id, req.item_id),

@@ -34,7 +34,9 @@ def test_routes_endpoint_aggregates_only_active_airport_pairs(monkeypatch):
     rows = service.list_routes()
     sql = captured["sql"]
     assert "from flights" in sql
-    assert "where active=true" in sql
+    assert "active=true" in sql
+    assert "travel_date >=" in sql
+    assert "48 hours" in sql
     assert "group by origin, destination" in sql
     assert "count(*)" in sql
     assert "array_agg(distinct source" in sql

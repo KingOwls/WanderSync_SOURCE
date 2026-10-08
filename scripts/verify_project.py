@@ -58,7 +58,7 @@ required_scrape_env = {
     "SCRAPE_MAX_CONCURRENCY_PER_SOURCE": "${SCRAPE_MAX_CONCURRENCY_PER_SOURCE:-1}",
     "SCRAPE_NAVIGATION_TIMEOUT_SECONDS": "${SCRAPE_NAVIGATION_TIMEOUT_SECONDS:-45}",
     "SCRAPE_RETRY_LIMIT": "${SCRAPE_RETRY_LIMIT:-2}",
-    "SCRAPE_ENABLED_SOURCES": "${SCRAPE_ENABLED_SOURCES:-clicair,satena,jetsmart,wingo,ghl_porton_medellin,alkilautos_national_medellin}",
+    "SCRAPE_ENABLED_SOURCES": "${SCRAPE_ENABLED_SOURCES:-clicair,satena,jetsmart,wingo,ghl_porton_medellin,alkilautos_national_medellin,ghl_bogota,spiwak_cali,ghl_cartagena,ghl_santa_marta,alkilautos_national_bogota,alkilautos_national_cali,alkilautos_national_cartagena,alkilautos_national_santa_marta}",
     "TARGET_OFFERS_PER_DIRECTION": "${TARGET_OFFERS_PER_DIRECTION:-10}",
     "MAX_ROUTE_CONCURRENCY_PER_SOURCE": "${MAX_ROUTE_CONCURRENCY_PER_SOURCE:-2}",
 }
@@ -150,7 +150,7 @@ for rel in ("backend/flight_service/main.py", "backend/hotel_service/main.py", "
 
 frontend_main = text("frontend/src/main.jsx")
 check("frontend:travel-network", "travelNetwork" in frontend_main)
-check("frontend:no-free-date-input", 'type="date"' not in frontend_main)
+check("frontend:date-range-and-observed-dates", 'type="date"' in frontend_main and "date-chip" in frontend_main)
 check("frontend:two-search-modes", "Explorar vuelos" in frontend_main and "Armar paquete" in frontend_main)
 check("frontend:no-hardcoded-city-list", "const cities =" not in frontend_main)
 check("frontend:flight-availability", "flightAvailability" in frontend_main)

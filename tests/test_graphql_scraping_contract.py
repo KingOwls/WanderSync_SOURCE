@@ -33,7 +33,7 @@ def test_flight_service_supports_airport_sets_and_exact_travel_date_without_sql_
     source = (ROOT / "backend" / "flight_service" / "main.py").read_text(encoding="utf-8")
     assert "origins: str | None" in source
     assert "destinations: str | None" in source
-    assert "travel_date: str | None" in source
+    assert "travel_date: date | None" in source
     assert "= ANY(%s)" in source
     assert "travel_date=%s" in source
     assert "active=TRUE" in source
@@ -46,8 +46,8 @@ def test_graphql_exposes_flexible_roundtrip_availability_contract():
     assert "returnDates" in SCHEMA
     assert "airportCodes" in SCHEMA
     assert "lowestFlightTotal" in SCHEMA
-    assert "outboundLimit: Int! = 8" in SCHEMA
-    assert "returnLimit: Int! = 8" in SCHEMA
+    assert "outboundLimit: Int! = 90" in SCHEMA
+    assert "returnLimit: Int! = 90" in SCHEMA
     assert "resolve_location" in GATEWAY
     assert "build_availability" in GATEWAY
 
@@ -116,5 +116,5 @@ def test_gateway_declares_all_twenty_searchable_pairs_and_direct_first_flow():
     assert "SUPPORTED_CITIES" in GATEWAY or "TOURIST_CITY_NAMES" in GATEWAY
     search_block = GATEWAY.split("async def flight_search",1)[1].split("@strawberry.field",1)[0] if "async def flight_search" in GATEWAY else ""
     assert '"travel_date": travel_date' in search_block
-    assert "if direct_offers" in search_block
+    assert "if all_offers" in search_block
     assert "build_suggested_connections" in search_block

@@ -15,12 +15,10 @@ def test_registry_has_exact_audited_route_keys():
     assert _keys("satena") == {
         "BOG-EOH", "EOH-BOG", "BOG-CLO", "CLO-BOG", "EOH-CLO", "CLO-EOH",
     }
-    assert _keys("jetsmart") == {
-        "BOG-SMR", "SMR-BOG", "MDE-SMR", "CLO-SMR", "CTG-BOG", "CTG-MDE", "CTG-CLO", "MDE-CTG",
-    }
-    assert _keys("wingo") == {"BOG-SMR", "MDE-SMR", "CTG-BOG", "BOG-MDE", "MDE-BOG"}
-    assert "SMR-CTG" not in _keys("jetsmart")
-    assert "SMR-MDE" not in _keys("wingo")
+    for source in ("jetsmart", "wingo"):
+        keys = _keys(source)
+        cities = {"BOG", "MDE", "CLO", "CTG", "SMR"}
+        assert keys == {f"{a}-{b}" for a in cities for b in cities if a != b}
 
 
 def test_registry_routes_are_https_source_owned_and_http_acquired():

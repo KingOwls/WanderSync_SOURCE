@@ -68,6 +68,19 @@ _WINGO = (
     RouteSpec("wingo", "MDE", "BOG", "https://www.wingo.com/es/vuelos-de-medellin-a-bogota"),
 )
 
+def _expand_public_routes(existing, source, template):
+    slugs = {"BOG": "bogota", "MDE": "medellin", "CLO": "cali", "CTG": "cartagena-de-indias" if source == "jetsmart" else "cartagena", "SMR": "santa-marta"}
+    result = list(existing)
+    seen = {(r.origin, r.destination) for r in result}
+    for origin, a in slugs.items():
+        for destination, b in slugs.items():
+            if origin != destination and (origin, destination) not in seen:
+                result.append(RouteSpec(source, origin, destination, template.format(a=a, b=b)))
+    return tuple(result)
+
+_JETSMART = _expand_public_routes(_JETSMART, "jetsmart", "https://jetsmart.com/ofertas/es-co/vuelos-desde-{a}-a-{b}")
+_WINGO = _expand_public_routes(_WINGO, "wingo", "https://www.wingo.com/es/vuelos-de-{a}-a-{b}")
+
 _ROUTE_REGISTRY = {"clicair": _CLIC, "satena": _SATENA, "latam": _LATAM, "jetsmart": _JETSMART, "wingo": _WINGO}
 
 

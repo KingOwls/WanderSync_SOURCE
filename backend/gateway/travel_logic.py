@@ -69,8 +69,8 @@ def build_availability(
     return_limit: int = 8,
     recommendation_limit: int = 12,
 ) -> AvailabilityResult:
-    outbound_limit = min(max(int(outbound_limit), 1), 8)
-    return_limit = min(max(int(return_limit), 1), 8)
+    outbound_limit = min(max(int(outbound_limit), 1), 366)
+    return_limit = min(max(int(return_limit), 1), 366)
     recommendation_limit = min(max(int(recommendation_limit), 1), 12)
     outbound_valid = _valid_price_rows(outbound_rows)
     return_valid = _valid_price_rows(return_rows)
@@ -142,6 +142,13 @@ def build_roundtrip_packages(
     cars = [r for r in car_rows if r.get("daily_price") is not None and r.get("currency", "COP") == "COP"]
     if not outbound or not returning or not hotels or not cars:
         return []
+    import heapq
+    # Only the cheapest `limit` per component can contribute to top `limit` packages.
+    keep = min(max(int(limit), 1), 12)
+    outbound = sorted(outbound, key=lambda r: float(r["price"]))[:keep]
+    returning = sorted(returning, key=lambda r: float(r["price"]))[:keep]
+    hotels = sorted(hotels, key=lambda r: float(r["nightly_price"]))[:keep]
+    cars = sorted(cars, key=lambda r: float(r["daily_price"]))[:keep]
     candidates: list[RoundTripPackageCandidate] = []
     for out in outbound:
         for back in returning:

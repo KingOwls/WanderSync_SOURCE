@@ -20,6 +20,9 @@ _ADAPTERS = {
     "alkilautos_national_medellin": NationalMedellinCarsAdapter(),
 }
 
+from ingestion.sources.city_services import CITY_ADAPTERS
+_ADAPTERS.update({adapter.name: adapter for adapter in CITY_ADAPTERS})
+
 _DEFAULT_ENABLED = (
     "clicair",
     "satena",
@@ -27,6 +30,7 @@ _DEFAULT_ENABLED = (
     "wingo",
     "ghl_porton_medellin",
     "alkilautos_national_medellin",
+    *(adapter.name for adapter in CITY_ADAPTERS),
 )
 
 

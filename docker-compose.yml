@@ -177,6 +177,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-wandersync}:${POSTGRES_PASSWORD:-wandersync_dev_password}@postgres:5432/${POSTGRES_DB:-wandersync}
       ALLOW_FAILURE_INJECTION: ${ALLOW_FAILURE_INJECTION:-true}
       REDIS_URL: redis://redis:6379/0
+      INGEST_INTERVAL_SECONDS: ${INGEST_INTERVAL_SECONDS:-86400}
       COOKIE_NAME: ${COOKIE_NAME:-wander_session}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:8080}
@@ -245,7 +246,7 @@ services:
       SCRAPE_MAX_CONCURRENCY_PER_SOURCE: ${SCRAPE_MAX_CONCURRENCY_PER_SOURCE:-1}
       SCRAPE_NAVIGATION_TIMEOUT_SECONDS: ${SCRAPE_NAVIGATION_TIMEOUT_SECONDS:-45}
       SCRAPE_RETRY_LIMIT: ${SCRAPE_RETRY_LIMIT:-2}
-      SCRAPE_ENABLED_SOURCES: ${SCRAPE_ENABLED_SOURCES:-clicair,satena,jetsmart,wingo,ghl_porton_medellin,alkilautos_national_medellin}
+      SCRAPE_ENABLED_SOURCES: ${SCRAPE_ENABLED_SOURCES:-clicair,satena,jetsmart,wingo,ghl_porton_medellin,alkilautos_national_medellin,ghl_bogota,spiwak_cali,ghl_cartagena,ghl_santa_marta,alkilautos_national_bogota,alkilautos_national_cali,alkilautos_national_cartagena,alkilautos_national_santa_marta}
       TARGET_OFFERS_PER_DIRECTION: ${TARGET_OFFERS_PER_DIRECTION:-10}
       MAX_ROUTE_CONCURRENCY_PER_SOURCE: ${MAX_ROUTE_CONCURRENCY_PER_SOURCE:-2}
     command: dask worker tcp://dask-scheduler:8786 --nthreads 2 --memory-limit 512MB
@@ -273,7 +274,7 @@ services:
       SCRAPE_MAX_CONCURRENCY_PER_SOURCE: ${SCRAPE_MAX_CONCURRENCY_PER_SOURCE:-1}
       SCRAPE_NAVIGATION_TIMEOUT_SECONDS: ${SCRAPE_NAVIGATION_TIMEOUT_SECONDS:-45}
       SCRAPE_RETRY_LIMIT: ${SCRAPE_RETRY_LIMIT:-2}
-      SCRAPE_ENABLED_SOURCES: ${SCRAPE_ENABLED_SOURCES:-clicair,satena,jetsmart,wingo,ghl_porton_medellin,alkilautos_national_medellin}
+      SCRAPE_ENABLED_SOURCES: ${SCRAPE_ENABLED_SOURCES:-clicair,satena,jetsmart,wingo,ghl_porton_medellin,alkilautos_national_medellin,ghl_bogota,spiwak_cali,ghl_cartagena,ghl_santa_marta,alkilautos_national_bogota,alkilautos_national_cali,alkilautos_national_cartagena,alkilautos_national_santa_marta}
       TARGET_OFFERS_PER_DIRECTION: ${TARGET_OFFERS_PER_DIRECTION:-10}
       MAX_ROUTE_CONCURRENCY_PER_SOURCE: ${MAX_ROUTE_CONCURRENCY_PER_SOURCE:-2}
     command: dask worker tcp://dask-scheduler:8786 --nthreads 2 --memory-limit 512MB
@@ -296,7 +297,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-wandersync}:${POSTGRES_PASSWORD:-wandersync_dev_password}@postgres:5432/${POSTGRES_DB:-wandersync}
       DASK_SCHEDULER: tcp://dask-scheduler:8786
       PREFECT_API_URL: http://prefect-server:4200/api
-      INGEST_INTERVAL_SECONDS: ${INGEST_INTERVAL_SECONDS:-900}
+      INGEST_INTERVAL_SECONDS: ${INGEST_INTERVAL_SECONDS:-86400}
       INGEST_RUN_ONCE: ${INGEST_RUN_ONCE:-false}
       SCRAPE_SNAPSHOT_ROOT: ${SCRAPE_SNAPSHOT_ROOT:-/data/snapshots}
       SCRAPE_CACHE_MINUTES: ${SCRAPE_CACHE_MINUTES:-30}
@@ -306,7 +307,7 @@ services:
       SCRAPE_MAX_CONCURRENCY_PER_SOURCE: ${SCRAPE_MAX_CONCURRENCY_PER_SOURCE:-1}
       SCRAPE_NAVIGATION_TIMEOUT_SECONDS: ${SCRAPE_NAVIGATION_TIMEOUT_SECONDS:-45}
       SCRAPE_RETRY_LIMIT: ${SCRAPE_RETRY_LIMIT:-2}
-      SCRAPE_ENABLED_SOURCES: ${SCRAPE_ENABLED_SOURCES:-clicair,satena,jetsmart,wingo,ghl_porton_medellin,alkilautos_national_medellin}
+      SCRAPE_ENABLED_SOURCES: ${SCRAPE_ENABLED_SOURCES:-clicair,satena,jetsmart,wingo,ghl_porton_medellin,alkilautos_national_medellin,ghl_bogota,spiwak_cali,ghl_cartagena,ghl_santa_marta,alkilautos_national_bogota,alkilautos_national_cali,alkilautos_national_cartagena,alkilautos_national_santa_marta}
       TARGET_OFFERS_PER_DIRECTION: ${TARGET_OFFERS_PER_DIRECTION:-10}
       MAX_ROUTE_CONCURRENCY_PER_SOURCE: ${MAX_ROUTE_CONCURRENCY_PER_SOURCE:-2}
     depends_on:

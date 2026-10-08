@@ -23,6 +23,8 @@ ROUTE_RE = re.compile(
 AIRPORT_RE = re.compile(r"(.+?)\s*\(([A-Z]{3})\)\s*$", re.I)
 HEADER_ALIASES = {
     "origin": {"desde"},
+    "departure_at": {"salida iso", "departure_at"},
+    "arrival_at": {"llegada iso", "arrival_at"},
     "destination": {"hasta", "a", "hacia"},
     "trip_type": {"tipo de vuelo", "tipo de tarifa"},
     "travel_date": {"fecha", "fechas"},
@@ -92,8 +94,8 @@ def _extract_offer_tables(soup: BeautifulSoup, airline: str) -> list[dict]:
                     "trip_type": trip_type,
                     "travel_date": travel_date,
                     "price_text": price_text,
-                    "departure_at": None,
-                    "arrival_at": None,
+                    "departure_at": cells[indexes["departure_at"]] if "departure_at" in indexes else None,
+                    "arrival_at": cells[indexes["arrival_at"]] if "arrival_at" in indexes else None,
                 }
             )
     return rows
